@@ -7,4 +7,4 @@ Google Calendar Event Scheduler
 
 ## Running instruction
 
-`python eventsheduler.py `
+`python eventsheduler.py`
