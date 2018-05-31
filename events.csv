@@ -1,0 +1,6 @@
+Project Name,Event name,Earliest Date,Latest Date,Hours,Predecessor Event,Gap to predecessor Event (days),Attendees
+AcmeCakes,ProjectIntro,20180312,20180331,2,,,
+AcmeCakes,Configure Xero,20180312,20180331,4,ProjectIntro,3,
+AcmeCakes,Configure Cin7,20180312,20180331,6,Configure Xero,,
+AcmeCakes,Import Customers,20180312,20180331,4,Configure Cin7,,
+AcmeCakes,Project Review,20180312,20180331,1,Import Customers,,
