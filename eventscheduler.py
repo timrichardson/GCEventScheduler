@@ -1,5 +1,5 @@
 ###############################################################################################33
-# Google calendar event sheduler
+# Google calendar event scheduler
 # v0.2
 #  + variable names refactored
 #  + added github repo: 
@@ -72,9 +72,10 @@ for event in events:
 #
 
 SCOPES = 'https://www.googleapis.com/auth/calendar'
-store = file.Storage('credentials.json')
+store = file.Storage('saved_token.json')
 creds = store.get()
 if not creds or creds.invalid:
+    # client_secret comes from Google developer console
     flow = client.flow_from_clientsecrets('client_secret.json', SCOPES)
     creds = tools.run_flow(flow, store)
 service = build('calendar', 'v3', http=creds.authorize(Http()))

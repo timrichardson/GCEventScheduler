@@ -1,6 +1,6 @@
 {
   "csv": "events.csv",
-  "calendar_id": "testcalendar@growthpath.com.au",
+  "calendar_id": "tim@growthpath.com.au",
   "blocked_days": ["20180430", "20180505"],
   "weekly_schedule": {
     "0": {"start" : "9:00", "end": "17:00"},
