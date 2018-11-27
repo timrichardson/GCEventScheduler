@@ -1,6 +1,13 @@
 # GCEventScheduler
 Google Calendar Event Scheduler
 
+It reads a CSV of event data, and adds them to the calendar, based on rules.
+
+Each event has an earliest data and latest date, a duration and a predecessor event.
+
+Settings.json contains working hours (in your local time)
+
+
 Built using python 3.6.5
 
 ## Installation requirements
