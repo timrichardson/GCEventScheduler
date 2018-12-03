@@ -34,8 +34,8 @@ RequestedEvent = NewType('RequestedEvent',OrderedDict)
 
 
 class CalendarGap(NamedTuple):
-    gap_start_date: datetime.datetime
-    gap_end_date: datetime.datetime
+    gap_start_datetime: datetime.datetime
+    gap_end_datetime: datetime.datetime
     gap_duration: datetime.timedelta
 
 class GapRequest(NamedTuple):
@@ -52,7 +52,7 @@ logger.setLevel(logging.DEBUG)
 ###############################################################################################33
 # Reading data from CSV file
 #
-settings = {}
+
 global_min_date = datetime.datetime(2018,1,1)
 global_max_date = datetime.datetime(2018,12,31)
 
@@ -193,6 +193,7 @@ def read_existing_events(settings,calendar_service)->List:
 
 def build_calendar_gaps(existing_calendar_events:List[GoogleEvent])->List[CalendarGap]:
     """ Make list of gaps in google events. May need to add a gap to extend from the last gap in the list to the end of the time under consideration"""
+    """ eliminate gaps which are on weekends or outside working hours, which could mean altering start date and end dates."""
     list_of_gaps = []
     events_with_start_times = [e for e in existing_calendar_events if 'dateTime' in e['start']]
     sorted_existing_events = sorted(events_with_start_times, key=lambda ev: parser.parse(ev['start']['dateTime']))
@@ -205,7 +206,8 @@ def build_calendar_gaps(existing_calendar_events:List[GoogleEvent])->List[Calend
             this_event_end_datetime = parser.parse(existing_calendar_event['end']['dateTime']) #type: datetime.datetime
             next_event_start_datetime = parser.parse(next_event['start']['dateTime']) #type: datetime.datetime
             if this_event_end_datetime < next_event_start_datetime:
-                new_gap = CalendarGap(gap_start_date=this_event_end_datetime,gap_end_date=next_event_start_datetime,
+                new_gap = CalendarGap(gap_start_datetime=this_event_end_datetime,
+                                      gap_end_datetime=next_event_start_datetime,
                                       gap_duration=next_event_start_datetime - this_event_end_datetime) # we have a gap
                 list_of_gaps.append(new_gap)
 
@@ -214,7 +216,8 @@ def build_calendar_gaps(existing_calendar_events:List[GoogleEvent])->List[Calend
 
 def find_candidate_gaps(gaps:List[CalendarGap], gap_request:GapRequest)->List[CalendarGap]:
     """
-    gap_request ={'minimum_start
+    gap_request ={'minimum_start...}
+    Returns a subset of the original gaps, but not copies.
 
     one list, it is sorted by start date.
 
@@ -228,11 +231,11 @@ def find_candidate_gaps(gaps:List[CalendarGap], gap_request:GapRequest)->List[Ca
 
     """
     def key_fun_startdate(cg:CalendarGap):
-        return cg.gap_start_date
+        return cg.gap_start_datetime
 
 
     def key_fun_enddate(cg: CalendarGap):
-        return cg.gap_end_date
+        return cg.gap_end_datetime
 
 
     gaps_sorted_by_start = SortedKeyList(key = key_fun_startdate)  #type: SortedKeyList[CalendarGap]
@@ -246,7 +249,19 @@ def find_candidate_gaps(gaps:List[CalendarGap], gap_request:GapRequest)->List[Ca
     return gaps_of_sufficient_duration
 
 
-def read_google_calendar_events(calendar_service)->List[GoogleEvent]:
+def update_gap(list_of_gaps:List[CalendarGap], original_gap:CalendarGap, new_startdatetime:datetime.datetime, new_enddatetime:datetime.datetime):
+    # whoops, Named tuples can't be modified!
+    """ modifies the collection of CalendarGaps in place. Use if after part of the original_gap is used for an event"""
+    revised_gap = CalendarGap(gap_start_datetime = new_startdatetime,
+                              gap_end_datetime=new_enddatetime,
+                              gap_duration=(new_enddatetime - new_startdatetime)
+                              )
+    list_of_gaps.remove(original_gap)
+    list_of_gaps.append(revised_gap)
+
+
+
+def read_google_calendar_events(calendar_service,settings:dict)->List[GoogleEvent]:
     events_result = calendar_service.events().list(calendarId=settings["calendar_id"],
                                                    timeMin=global_min_date.isoformat() + 'Z',
                                                    timeMax=global_max_date.isoformat() + 'Z',
@@ -256,12 +271,54 @@ def read_google_calendar_events(calendar_service)->List[GoogleEvent]:
     return existing_calendar_events
 
 
-def add_events_to_calendar_v2(events_to_schedule:Dict[ProjectName, List[RequestedEvent]],calender_service,gaps:List[CalendarGap]):
-    for project,candidate_event in events_to_schedule.items():
-        candidate_gaps = find_candidate_gaps(gaps=gaps, gap_request=GapRequest(
-            minimum_start_date=datetime.datetime(2018, 8, 1).astimezone(UTC),
-            maximum_end_date=datetime.datetime(2018, 8, 31).astimezone(UTC),
-            gap_duration_minutes=30))
+def add_events_to_calendar_v2(events_to_schedule:Dict[ProjectName, List[RequestedEvent]],calender_service,gaps:List[CalendarGap],settings:dict):
+    # events are scheduled as early as possible. This should eliminate dependency loops I hope
+    # gaps is modified
+    projects_found = events_to_schedule.keys()
+    localtimezone = timezone(settings['TIMEZONE'])
+    for project,events in events_to_schedule.items():
+        events_by_name = {event['Event name']:event for event in events}
+        for event in events:
+            earliest_datetime = localtimezone.localize(parser.parse(event['Earliest Date']))
+            predecessor_event_name = event.get('Predecessor Event')
+            if predecessor_event_name:
+                predecessor_finish = events_by_name.get(predecessor_event_name,{}).get('end_datetime')
+                if predecessor_finish:
+                    try:
+                        gap_in_days = int(event['Gap to predecessor Event (days)'])
+                    except ValueError:
+                        gap_in_days = 0
+                    earliest_datetime_predecessor_rule = predecessor_finish + datetime.timedelta(days=gap_in_days)
+                    earliest_datetime = max(earliest_datetime,earliest_datetime_predecessor_rule)
+            latest_datetime = localtimezone.localize(parser.parse(event['Latest Date']))
+            event_duration_minutes = int(float(event['Hours']) * 60)
+
+            candidate_gaps = find_candidate_gaps(gaps=gaps, gap_request=GapRequest(
+                minimum_start_date=earliest_datetime,
+                maximum_end_date=latest_datetime,
+                gap_duration_minutes=event_duration_minutes))
+            if len(candidate_gaps) > 0:
+                chosen_gap=candidate_gaps[0]
+                events_by_name[event['Event name']]['end_datetime'] = chosen_gap.gap_end_datetime
+                #add event to calendar
+                insert_success = insert_event_to_google_calendar(calendar_service=calender_service, event_name=event['Event name'],
+                                                                 event_start_datetime=chosen_gap.gap_start_datetime,
+                                                                 event_duration_minutes=event_duration_minutes)
+                if insert_success:
+                   update_gap(list_of_gaps=gaps,
+                              original_gap=chosen_gap,new_startdatetime=chosen_gap.gap_start_datetime + datetime.timedelta(minutes=event_duration_minutes),
+                              new_enddatetime=chosen_gap.gap_end_datetime)
+
+                print(f"Added to calendar: Event: {event} using gap: {chosen_gap}")
+            else:
+                print(f"No gap available for event: {event}")
+                break
+
+
+
+def insert_event_to_google_calendar(calendar_service,event_name:str,event_start_datetime, event_duration_minutes)->bool:
+    return True
+
 
 
 
@@ -473,6 +530,19 @@ def test_find_gap():
                                                           gap_duration_minutes=30))
 
     print (candidate_gaps)
+
+
+def test_fill_calendar():
+    settings = read_settings()
+    calender_service = setup_calendar_API(settings=settings)
+    google_events = read_google_calendar_events(calendar_service=calender_service,settings=settings)
+    gaps = build_calendar_gaps(existing_calendar_events=google_events)
+    events = read_events(settings=settings)
+    ordered_scheduled_events = build_ordered_events_per_project(settings=settings, events=events)
+    add_events_to_calendar_v2(events_to_schedule = ordered_scheduled_events,
+        calender_service=calender_service, gaps=gaps,settings=settings)
+
+
 
 
 

@@ -18,5 +18,6 @@
   "HOURS": "Hours",
   "PREV_EVENT": "Predecessor Event",
   "GAP": "Gap to predecessor Event (days)",
-  "ATTENDEES": "Attendees"
+  "ATTENDEES": "Attendees",
+  "TIMEZONE": "Australia/Melbourne"
 }
